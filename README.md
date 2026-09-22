@@ -2,7 +2,7 @@
 
 English version: [README.en.md](README.en.md)
 
-一个用于上下文压缩之前 [Pi](https://github.com/badlogic/pi-mono) 的扩展，此处的源码来源于[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction)的原生 claude code 的插件，针对 pi 的情况进行了适配。它会在 Pi 执行原生上下文压缩前，筛选不再需要的工具调用和工具结果，最终的压缩逻辑还是交给 Pi 原生的 `/compact()` 管理。
+一个用于上下文压缩之前 [Pi](https://github.com/badlogic/pi-mono) 的扩展，核心判断逻辑复用了来源于[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction)原作者的原生 claude code 的插件，针对 pi 的情况进行了适配。它会在 Pi 执行原生上下文压缩前，筛选不再需要的工具调用和工具结果，最终的压缩逻辑还是交给 Pi 原生的 `/compact()` 管理。
 
 里面的决策策略由 Jev 模型负责判断哪些工具调用应保留、删除或截短，本插件不修改 Pi 源码，也不会自行调用 Pi 导出的 `compact()` 函数。
 
