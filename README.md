@@ -1,7 +1,9 @@
 # pi-jev-compaction
 
-一个用于 [Pi](https://github.com/badlogic/pi-mono) 的扩展。在 Pi 执行原生上下文压缩前，调用
-[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction)，筛选不再需要的工具调用和工具结果。
+
+English version: [README.en.md](README.en.md)
+
+一个用于上下文压缩之前 [Pi](https://github.com/badlogic/pi-mono) 的扩展，此处的源码来源于[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction)的原生 claude code 的插件，针对 pi 的情况进行了适配。它会在 Pi 执行原生上下文压缩前，筛选不再需要的工具调用和工具结果。
 
 本项目是 **Pi 适配层**，不是对 Pi 原生压缩系统的替换。Jev 只负责判断哪些工具调用应保留、删除或截短；最终摘要、压缩节点、文件操作信息和近期上下文仍由 Pi 原生 `compact()` 生成和管理。
 
@@ -163,7 +165,3 @@ npm pack --ignore-scripts
 
 本适配层使用 MIT License。使用时也请查看上游
 [`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction) 项目的许可证和署名要求。
-
----
-
-English version: [README.en.md](README.en.md)
