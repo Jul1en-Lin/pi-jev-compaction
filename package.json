@@ -18,7 +18,7 @@
   "pi": {
     "extensions": ["./extensions"]
   },
-  "files": ["extensions", "src", "README.md", "LICENSE", "package.json", "package-lock.json"],
+  "files": ["extensions", "src", "assets", "README.md", "README.en.md", "LICENSE", "package.json", "package-lock.json"],
   "bundledDependencies": ["fast-jev-compaction"],
   "dependencies": {
     "fast-jev-compaction": "0.4.0"

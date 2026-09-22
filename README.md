@@ -5,6 +5,14 @@
 
 本项目是 **Pi 适配层**，不是对 Pi 原生压缩系统的替换。Jev 只负责判断哪些工具调用应保留、删除或截短；最终摘要、压缩节点、文件操作信息和近期上下文仍由 Pi 原生 `compact()` 生成和管理。
 
+## 视频演示
+
+<video controls width="640" src="./assets/tamarajtran-jev-compaction.mp4">
+  Your browser does not support the video tag.
+</video>
+
+视频来源：[Tamara Tran 在 X 发布的视频](https://x.com/tamarajtran/status/2100694549362553153)。视频文件仅作为项目演示素材保留，版权归原作者所有。
+
 ## 工作方式
 
 手动执行 `/compact` 或 Pi 自动触发压缩时，流程如下：

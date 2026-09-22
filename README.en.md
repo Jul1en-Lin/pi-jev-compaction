@@ -9,6 +9,16 @@ This package is a Pi adapter, not a replacement for Pi's compaction system.
 Jev makes the keep/drop/truncate decisions; Pi still creates the summary,
 compaction entry, file-operation details, and retained recent context.
 
+## Demo
+
+<video controls width="640" src="./assets/tamarajtran-jev-compaction.mp4">
+  Your browser does not support the video tag.
+</video>
+
+Video source: [Tamara Tran's post on X](https://x.com/tamarajtran/status/2100694549362553153).
+The video is included as demonstration material; all rights remain with the
+original author.
+
 ## How it works
 
 For both manual `/compact` and automatic compaction:
