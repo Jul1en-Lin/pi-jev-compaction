@@ -1,5 +1,6 @@
 import {
   compact,
+  resolveOptions,
   buildJevRequest,
   parseJevResponse,
   type CallDecision,
@@ -217,17 +218,23 @@ function toJevMessages(messages: readonly AgentMessage[], pairs: readonly Pair[]
       };
     }
 
-    if (message.role === "toolResult" && eligible.has(message.toolCallId)) {
-      return {
-        role: "user",
-        text: "",
-        toolUses: [],
-        toolResults: [{
-          tool_use_id: message.toolCallId,
-          text: contentText(message.content),
-          isError: message.isError,
-        }],
-      };
+    if (message.role === "toolResult") {
+      if (eligible.has(message.toolCallId)) {
+        return {
+          role: "user",
+          text: "",
+          toolUses: [],
+          toolResults: [{
+            tool_use_id: message.toolCallId,
+            text: contentText(message.content),
+            isError: message.isError,
+          }],
+        };
+      }
+
+      // Unpaired or ineligible results must not become user text or goals in
+      // Jev's state; the original Pi message is preserved on output.
+      return { role: "user", text: "", toolUses: [] };
     }
 
     return { role: "user", text: messageText(message), toolUses: [] };
@@ -345,13 +352,18 @@ export async function filterMessages(
     return { messages: [...messages], changed: false, candidateCalls: 0, droppedCalls: 0, truncatedResults: 0 };
   }
 
-  const compactOptions = options.compactOptions ?? {};
+  const compactOptions = resolveOptions(options.compactOptions ?? {});
   const result = await rejectOnAbort(
     compact(toJevMessages(messages, pairs), options.asker, compactOptions),
     options.signal,
   );
-  const headChars = compactOptions.truncateHeadChars ?? 300;
-  return applyActions(messages, decisionActions(result.decisions, pairs), headChars, pairs.length);
+  const reviewedCalls = result.decisions.filter((decision) => decision.reason !== "pinned").length;
+  return applyActions(
+    messages,
+    decisionActions(result.decisions, pairs),
+    compactOptions.truncateHeadChars,
+    reviewedCalls,
+  );
 }
 
 /** Filter Pi's two native summary inputs independently; their boundaries stay intact. */

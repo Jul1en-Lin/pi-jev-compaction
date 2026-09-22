@@ -1,7 +1,7 @@
 {
-  "name": "pi-fast-jev-compaction",
-  "version": "0.1.0",
-  "description": "Apply fast-jev-compaction decisions before Pi's native compaction summary.",
+  "name": "@lienat/pi-jev-compaction",
+  "version": "0.1.1",
+  "description": "Pi extension that uses TypeSafe Jev to prune eligible historical tool calls before native compaction, preserving native messages and falling back safely on failure.",
   "type": "module",
   "license": "MIT",
   "repository": {

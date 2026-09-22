@@ -97,6 +97,64 @@ test("maps upstream decisions onto native Pi messages without rebuilding thinkin
   assert.equal((original[1] as Extract<AgentMessage, { role: "assistant" }>).content.length, 3);
 });
 
+test("normalizes truncation options before rewriting native results", async (t) => {
+  for (const { label, value, headChars, omittedChars } of [
+    { label: "default", value: undefined, headChars: 300, omittedChars: 700 },
+    { label: "negative", value: -1, headChars: 0, omittedChars: 1000 },
+    { label: "zero", value: 0, headChars: 0, omittedChars: 1000 },
+    { label: "NaN", value: Number.NaN, headChars: 300, omittedChars: 700 },
+    { label: "Infinity", value: Number.POSITIVE_INFINITY, headChars: 300, omittedChars: 700 },
+    { label: "fractional", value: 3.7, headChars: 3, omittedChars: 997 },
+  ]) {
+    await t.test(label, async () => {
+      const source = toolResult("truncate", "x".repeat(1000));
+      const call = assistant([{ type: "toolCall", id: "truncate", name: "read", arguments: {} }]);
+      const messages: AgentMessage[] = [
+        { role: "user", content: "original goal", timestamp: 0 },
+        call,
+        source,
+      ];
+      let asked = false;
+      const result = await filterMessages(messages, {
+        asker: {
+          async ask(state, questions) {
+            asked = true;
+            assert.ok(typeof state === "object" && "goal" in state);
+            assert.equal(state.goal, "explicit compaction goal");
+            assert.deepEqual(Object.keys(questions).sort(), ["call_t1", "result_t1"]);
+            return { answers: { call_t1: { noul: 1 }, result_t1: { noul: 0.7 } } };
+          },
+        },
+        compactOptions: {
+          preserveRecentMessages: 0,
+          truncateHeadChars: value,
+          goal: "explicit compaction goal",
+          keepThreshold: 0.8,
+        },
+      });
+
+      assert.equal(asked, true);
+      assert.equal(result.changed, true);
+      assert.equal(result.candidateCalls, 1);
+      assert.equal(result.droppedCalls, 0);
+      assert.equal(result.truncatedResults, 1);
+      assert.equal(result.messages[1], call);
+      const rewritten = result.messages[2];
+      assert.equal(rewritten.role, "toolResult");
+      assert.deepEqual(rewritten.content, [
+        ...(headChars > 0 ? [{ type: "text", text: "x".repeat(headChars) }] : []),
+        {
+          type: "text",
+          text: `[fast-jev-compaction truncated ${omittedChars} chars of this tool result; re-run the tool if needed]`,
+        },
+      ]);
+      assert.equal(source.role, "toolResult");
+      assert.deepEqual(source.content, [{ type: "text", text: "x".repeat(1000) }]);
+      assert.equal(messages[2], source);
+    });
+  }
+});
+
 test("protects image tool results and leaves incomplete cross-boundary pairs unchanged", async () => {
   const imageResult: AgentMessage = {
     role: "toolResult",
@@ -128,27 +186,49 @@ test("protects image tool results and leaves incomplete cross-boundary pairs unc
   assert.equal(split.turnPrefixMessages[0], resultOnly[0]);
 });
 
-test("filters both native summary inputs independently", async () => {
+test("filters both native summary inputs independently while preserving a cross-input pair", async () => {
+  const crossCall = assistant([{ type: "toolCall", id: "across", name: "read", arguments: {} }]);
+  const crossText = "Cross-input tool output is not the user goal";
+  const crossResult = toolResult("across", crossText);
   const history: AgentMessage[] = [
     { role: "user", content: "history", timestamp: 0 },
     assistant([{ type: "toolCall", id: "history", name: "read", arguments: {} }]),
     toolResult("history", "history result"),
+    crossCall,
   ];
   const prefix: AgentMessage[] = [
     { role: "user", content: "prefix", timestamp: 0 },
     assistant([{ type: "toolCall", id: "prefix", name: "read", arguments: {} }]),
     toolResult("prefix", "prefix result"),
+    crossResult,
   ];
-
+  const original = structuredClone({ history, prefix });
+  const observedGoals: unknown[] = [];
   const result = await filterPreparation(history, prefix, {
-    asker: decisionAsker({ t1: { call: 0, result: 0 } }),
+    asker: {
+      async ask(state, questions) {
+        assert.ok(typeof state === "object" && "goal" in state);
+        observedGoals.push(state.goal);
+        assert.equal(JSON.stringify(state).includes(crossText), false);
+        assert.deepEqual(Object.keys(questions).sort(), ["call_t1", "result_t1"]);
+        return { answers: { call_t1: { noul: 0 }, result_t1: { noul: 0 } } };
+      },
+    },
     compactOptions: { preserveRecentMessages: 0 },
   });
 
+  assert.deepEqual(observedGoals, ["history", "prefix"]);
   assert.equal(result.changed, true);
-  assert.deepEqual(result.messagesToSummarize, [{ role: "user", content: "history", timestamp: 0 }]);
-  assert.deepEqual(result.turnPrefixMessages, [{ role: "user", content: "prefix", timestamp: 0 }]);
+  assert.equal(result.candidateCalls, 2);
   assert.equal(result.droppedCalls, 2);
+  assert.equal(result.truncatedResults, 0);
+  assert.deepEqual(result.messagesToSummarize, [history[0], crossCall]);
+  assert.deepEqual(result.turnPrefixMessages, [prefix[0], crossResult]);
+  assert.equal(result.messagesToSummarize[0], history[0]);
+  assert.equal(result.messagesToSummarize[1], crossCall);
+  assert.equal(result.turnPrefixMessages[0], prefix[0]);
+  assert.equal(result.turnPrefixMessages[1], crossResult);
+  assert.deepEqual({ history, prefix }, original);
 });
 
 test("timeout rejects before a late Jev result can affect either input", async () => {
@@ -187,6 +267,139 @@ test("timeout rejects before a late Jev result can affect either input", async (
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(messages, original);
   deadline.dispose();
+});
+
+test("does not count pinned pairs as reviewed", async () => {
+  const messages: AgentMessage[] = [
+    assistant([{ type: "toolCall", id: "pinned", name: "read", arguments: {} }]),
+    toolResult("pinned", "pinned output"),
+  ];
+  let asked = false;
+  const result = await filterMessages(messages, {
+    asker: {
+      async ask() {
+        asked = true;
+        return { answers: {} };
+      },
+    },
+  });
+
+  assert.equal(asked, false);
+  assert.equal(result.candidateCalls, 0);
+  assert.equal(result.changed, false);
+});
+
+test("counts only reviewed calls across batches with first and recent pairs pinned", async () => {
+  const firstCall = assistant([{ type: "toolCall", id: "first", name: "read", arguments: {} }]);
+  const firstResult = toolResult("first", "first output");
+  const recentCall = assistant([{ type: "toolCall", id: "recent", name: "read", arguments: {} }]);
+  const recentResult = toolResult("recent", "recent output");
+  const goal: AgentMessage = { role: "user", content: "goal", timestamp: 0 };
+  const messages: AgentMessage[] = [
+    firstCall,
+    firstResult,
+    goal,
+    ...Array.from({ length: 4 }, (_, index) => [
+      assistant([{ type: "toolCall" as const, id: `old-${index}`, name: "read", arguments: {} }]),
+      toolResult(`old-${index}`, "old output"),
+    ]).flat(),
+    recentCall,
+    recentResult,
+  ];
+  const questionBatches: string[][] = [];
+  const result = await filterMessages(messages, {
+    asker: {
+      async ask(_state, questions) {
+        questionBatches.push(Object.keys(questions));
+        return { answers: Object.fromEntries(Object.keys(questions).map((key) => [key, { noul: 0 }])) };
+      },
+    },
+    compactOptions: { preserveRecentMessages: 2, maxRequestTokens: 1000 },
+  });
+
+  assert.ok(questionBatches.length > 1, "must exercise multiple Jev batches");
+  assert.deepEqual(questionBatches.flat().sort(), [
+    "call_t2", "call_t3", "call_t4", "call_t5",
+    "result_t2", "result_t3", "result_t4", "result_t5",
+  ]);
+  assert.equal(result.candidateCalls, 4);
+  assert.equal(result.droppedCalls, 4);
+  assert.equal(result.truncatedResults, 0);
+  assert.equal(result.changed, true);
+  const expected = [firstCall, firstResult, goal, recentCall, recentResult];
+  assert.deepEqual(result.messages, expected);
+  result.messages.forEach((message, index) => assert.equal(message, expected[index]));
+});
+
+test("preserves ineligible results without treating their text as Jev history or goals", async (t) => {
+  const excludedText = "This tool output is not a user instruction";
+  const excludedCall = assistant([{ type: "toolCall", id: "excluded", name: "read", arguments: {} }]);
+  const scenarios: Array<{ label: string; excluded: AgentMessage[] }> = [
+    { label: "orphan result", excluded: [toolResult("excluded", excludedText)] },
+    {
+      label: "image-bearing result with text",
+      excluded: [excludedCall, {
+        role: "toolResult",
+        toolCallId: "excluded",
+        toolName: "read",
+        content: [
+          { type: "text", text: excludedText },
+          { type: "image", data: "base64", mimeType: "image/png" },
+        ],
+        isError: false,
+        timestamp: 2,
+      }],
+    },
+    {
+      label: "duplicate call IDs",
+      excluded: [
+        excludedCall,
+        assistant([{ type: "toolCall", id: "excluded", name: "read", arguments: {} }]),
+        toolResult("excluded", excludedText),
+      ],
+    },
+    {
+      label: "duplicate result IDs",
+      excluded: [excludedCall, toolResult("excluded", excludedText), toolResult("excluded", excludedText)],
+    },
+  ];
+
+  for (const { label, excluded } of scenarios) {
+    await t.test(label, async () => {
+      const goal: AgentMessage = { role: "user", content: "Investigate the actual user request", timestamp: 0 };
+      const messages: AgentMessage[] = [
+        goal,
+        ...excluded,
+        assistant([{ type: "toolCall", id: "paired", name: "read", arguments: {} }]),
+        toolResult("paired", "paired output"),
+      ];
+      const original = structuredClone(messages);
+      let requests = 0;
+      const result = await filterMessages(messages, {
+        asker: {
+          async ask(state, questions) {
+            requests++;
+            assert.ok(typeof state === "object" && "goal" in state);
+            assert.equal(state.goal, "Investigate the actual user request");
+            assert.equal(JSON.stringify(state).includes(excludedText), false);
+            assert.deepEqual(Object.keys(questions).sort(), ["call_t1", "result_t1"]);
+            return { answers: { call_t1: { noul: 0 }, result_t1: { noul: 0 } } };
+          },
+        },
+        compactOptions: { preserveRecentMessages: 0 },
+      });
+
+      assert.equal(requests, 1, "must reach Jev instead of returning early");
+      assert.equal(result.changed, true);
+      assert.equal(result.candidateCalls, 1);
+      assert.equal(result.droppedCalls, 1);
+      assert.equal(result.truncatedResults, 0);
+      const expected = [goal, ...excluded];
+      assert.deepEqual(result.messages, expected);
+      result.messages.forEach((message, index) => assert.equal(message, expected[index]));
+      assert.deepEqual(messages, original);
+    });
+  }
 });
 
 test("Jev failure leaves the original messages available for native compaction", async () => {

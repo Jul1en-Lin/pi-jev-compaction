@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { JevAsker } from "fast-jev-compaction";
 import { formatElapsed, install, parseTimeout } from "../extensions/fast-jev-compaction.js";
@@ -10,27 +11,49 @@ const usage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+function toolCall(id: string): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [{ type: "toolCall", id, name: "read", arguments: {} }],
+    api: "openai-completions",
+    provider: "test",
+    model: "test",
+    usage,
+    stopReason: "toolUse",
+    timestamp: 1,
+  };
+}
+
+function toolResult(id: string): AgentMessage {
+  return {
+    role: "toolResult",
+    toolCallId: id,
+    toolName: "read",
+    content: [{ type: "text", text: "unused" }],
+    isError: false,
+    timestamp: 2,
+  };
+}
+
 function toolPair(id: string): AgentMessage[] {
   return [
     { role: "user", content: "Inspect the tool output", timestamp: 0 },
-    {
-      role: "assistant",
-      content: [{ type: "toolCall", id, name: "read", arguments: {} }],
-      api: "openai-completions",
-      provider: "test",
-      model: "test",
-      usage,
-      stopReason: "toolUse",
-      timestamp: 1,
-    },
-    {
-      role: "toolResult",
-      toolCallId: id,
-      toolName: "read",
-      content: [{ type: "text", text: "unused" }],
-      isError: false,
-      timestamp: 2,
-    },
+    toolCall(id),
+    toolResult(id),
+    ...Array.from({ length: 6 }, (_, index) => ({
+      role: "user" as const,
+      content: `recent ${index}`,
+      timestamp: index + 3,
+    })),
+  ];
+}
+
+function mixedPairs(id: string): AgentMessage[] {
+  return [
+    toolCall(`${id}-pinned`),
+    toolResult(`${id}-pinned`),
+    toolCall(`${id}-candidate`),
+    toolResult(`${id}-candidate`),
     ...Array.from({ length: 6 }, (_, index) => ({
       role: "user" as const,
       content: `recent ${index}`,
@@ -152,6 +175,104 @@ test("a run that prunes nothing still prints one line and changes no preparation
   assert.equal(preparation.turnPrefixMessages, turnPrefixMessages);
   assert.equal(notifications.length, 1);
   assert.match(notifications[0]!, oneLineWithTimes("2 call\\(s\\) reviewed: nothing dropped"));
+});
+
+test("all-pinned inputs skip Jev and retain both native preparation references", async () => {
+  let handler: ((event: any, ctx: any) => Promise<void>) | undefined;
+  const pi = { on(_event: string, callback: (event: any, ctx: any) => Promise<void>) { handler = callback; } } as unknown as ExtensionAPI;
+  install(pi, { asker: { async ask() { assert.fail("pinned calls must not be reviewed"); } } });
+
+  const messagesToSummarize = [toolCall("history-pinned"), toolResult("history-pinned")];
+  const turnPrefixMessages = [toolCall("prefix-pinned"), toolResult("prefix-pinned")];
+  const preparation = { messagesToSummarize, turnPrefixMessages };
+  const notifications: string[] = [];
+  await handler!({ preparation, signal: new AbortController().signal }, {
+    ui: { notify(message: string) { notifications.push(message); } },
+  });
+
+  assert.equal(preparation.messagesToSummarize, messagesToSummarize);
+  assert.equal(preparation.turnPrefixMessages, turnPrefixMessages);
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0]!, oneLineWithTimes("0 call\\(s\\) reviewed: nothing dropped"));
+});
+
+test("mixed pinned calls retain native identities and report only reviewed calls", async () => {
+  for (const [noul, expected, changed] of [
+    [1, "nothing dropped", false],
+    [0, "dropped 2, shortened 0", true],
+  ] as const) {
+    let handler: ((event: any, ctx: any) => Promise<void>) | undefined;
+    const pi = { on(_event: string, callback: (event: any, ctx: any) => Promise<void>) { handler = callback; } } as unknown as ExtensionAPI;
+    const questionsPerRequest: number[] = [];
+    install(pi, {
+      asker: {
+        async ask(_state, questions) {
+          questionsPerRequest.push(Object.keys(questions).length);
+          return { answers: Object.fromEntries(Object.keys(questions).map((key) => [key, { noul }])) };
+        },
+      },
+    });
+
+    const messagesToSummarize = mixedPairs("history");
+    const turnPrefixMessages = mixedPairs("prefix");
+    const historyPinned = messagesToSummarize.slice(0, 2);
+    const prefixPinned = turnPrefixMessages.slice(0, 2);
+    const preparation = { messagesToSummarize, turnPrefixMessages };
+    const notifications: string[] = [];
+    await handler!({ preparation, signal: new AbortController().signal }, {
+      ui: { notify(message: string) { notifications.push(message); } },
+    });
+
+    assert.deepEqual(questionsPerRequest, [2, 2]);
+    assert.equal(preparation.messagesToSummarize[0], historyPinned[0]);
+    assert.equal(preparation.messagesToSummarize[1], historyPinned[1]);
+    assert.equal(preparation.turnPrefixMessages[0], prefixPinned[0]);
+    assert.equal(preparation.turnPrefixMessages[1], prefixPinned[1]);
+    assert.equal(preparation.messagesToSummarize === messagesToSummarize, !changed);
+    assert.equal(preparation.turnPrefixMessages === turnPrefixMessages, !changed);
+    assert.equal(notifications.length, 1);
+    assert.match(notifications[0]!, oneLineWithTimes(`2 call\\(s\\) reviewed: ${expected}`));
+  }
+});
+
+test("default request batching reports reviewed calls rather than questions or batches", async () => {
+  const calls = 500;
+  let handler: ((event: any, ctx: any) => Promise<void>) | undefined;
+  const pi = { on(_event: string, callback: (event: any, ctx: any) => Promise<void>) { handler = callback; } } as unknown as ExtensionAPI;
+  const askedQuestions: string[] = [];
+  let askCalls = 0;
+  install(pi, {
+    asker: {
+      async ask(_state, questions) {
+        askCalls++;
+        const keys = Object.keys(questions);
+        askedQuestions.push(...keys);
+        return { answers: Object.fromEntries(keys.map((key) => [key, { noul: 1 }])) };
+      },
+    },
+  });
+
+  const messagesToSummarize: AgentMessage[] = [
+    { role: "user", content: "start", timestamp: 0 },
+    {
+      ...toolCall("placeholder"),
+      content: Array.from({ length: calls }, (_, index) => ({
+        type: "toolCall" as const, id: `batch-${index}`, name: "read", arguments: {},
+      })),
+    },
+    ...Array.from({ length: calls }, (_, index) => toolResult(`batch-${index}`)),
+    ...Array.from({ length: 6 }, (_, index) => ({ role: "user" as const, content: `recent ${index}`, timestamp: index + 3 })),
+  ];
+  const preparation = { messagesToSummarize, turnPrefixMessages: [] as AgentMessage[] };
+  const notifications: string[] = [];
+  await handler!({ preparation, signal: new AbortController().signal }, {
+    ui: { notify(message: string) { notifications.push(message); } },
+  });
+
+  assert.ok(askCalls > 1);
+  assert.equal(askedQuestions.length, calls * 2);
+  assert.equal(new Set(askedQuestions).size, calls * 2);
+  assert.match(notifications[0]!, oneLineWithTimes(`${calls} call\\(s\\) reviewed: nothing dropped`));
 });
 
 test("invalid timeout configuration retains the 15 second default", () => {

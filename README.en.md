@@ -1,13 +1,17 @@
 # pi-jev-compaction
 
-A [Pi](https://github.com/badlogic/pi-mono) extension that uses
-[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction) to
-prune stale tool calls immediately before Pi creates its native compaction
-summary.
+A [Pi](https://github.com/badlogic/pi-mono) extension for context compaction.
+It uses `fast-jev-compaction@0.4.0` for Jev's tool-call decisions and adapts
+those decisions to Pi's native message and compaction lifecycle.
 
-This package is a Pi adapter, not a replacement for Pi's compaction system.
-Jev makes the keep/drop/truncate decisions; Pi still creates the summary,
-compaction entry, file-operation details, and retained recent context.
+The `0.4.0` dependency is the
+[`aleksvega/fast-jev-compaction`](https://github.com/aleksvega/fast-jev-compaction)
+fork based on
+[`tamaratran/fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction).
+This project is a **Pi adapter**, not a replacement for Pi's compaction system:
+Jev decides which eligible tool calls and results to keep, drop, or shorten;
+Pi still creates the summary, compaction entry, file-operation details, and
+retained recent context.
 
 ## Demo
 
@@ -41,33 +45,62 @@ Jev reviews eligible tool call/result pairs
                                          Pi's native compact()
 ```
 
-The adapter preserves Pi's native messages instead of serializing Jev's
-simplified transcript back into Pi. It only changes:
+Rather than serializing Jev's simplified transcript back into Pi, the adapter
+maps Jev's decisions onto the original Pi messages. Pi's thinking blocks,
+images, tool-call metadata, and other native message data therefore remain
+native in the final preparation.
+
+The adapter only modifies:
 
 - `messagesToSummarize`
 - `turnPrefixMessages`
 
-All other compaction metadata remains owned by Pi, including
-`firstKeptEntryId`, `tokensBefore`, `previousSummary`, `fileOps`, `settings`,
-and `isSplitTurn`.
+All other compaction metadata remains owned by Pi and is never touched by this
+extension, including:
 
-### What Jev can change
+- `firstKeptEntryId`
+- `tokensBefore`
+- `previousSummary`
+- `fileOps`
+- `settings`
+- `isSplitTurn`
 
-Only a paired, text-only tool call and tool result within the same native
-compaction input are eligible. The adapter leaves these untouched:
+Pi computes some of this metadata before the hook runs. Consequently, if Jev
+removes an old `write` or `edit` call, `fileOps` may still describe that call;
+the extension does not recalculate Pi's native metadata.
+
+### What can be filtered
+
+Only paired, text-only tool calls and tool results within the same native
+compaction input are eligible. `messagesToSummarize` and
+`turnPrefixMessages` are processed independently; they are never combined for
+Jev decisions. Pi's separately retained recent region and messages outside
+these two arrays are not sent to Jev.
+
+The adapter leaves the following native messages or content untouched:
 
 - user and assistant prose;
-- thinking blocks and image content;
+- thinking blocks and image content in the original Pi messages;
 - image-bearing tool results;
 - incomplete or duplicate call/result pairs;
 - pairs crossing the two native input boundaries;
 - Pi's separately retained recent region;
 - tool results without a valid matching call.
 
-A `drop_call` decision removes the call and its paired result. A
-`drop_result` decision keeps the call and truncates the result using the
-upstream default of 300 head characters plus a note. Pi then summarizes the
-filtered native messages normally.
+Ineligible tool results—unpaired results, duplicate IDs, image-bearing results,
+or pairs crossing the two compaction inputs—are not converted into ordinary
+user messages, and their text is excluded from Jev's temporary decision state.
+The original Pi messages remain preserved.
+
+A `drop_call` decision removes the call and its paired result. A `drop_result`
+decision keeps the call. With the default `truncateHeadChars` of 300, a result
+is shortened only when it is longer than 420 characters; shorter results stay
+unchanged. Longer results keep their first 300 characters and receive a note.
+Pi then summarizes the filtered native messages normally.
+
+The `reviewed` count in notifications includes only tool calls actually queried
+through Jev. It excludes calls kept by upstream protection rules (pinned) and
+is not a count of questions or request batches.
 
 ## Compatibility
 
@@ -75,16 +108,22 @@ filtered native messages normally.
 - Node.js `>=24`
 - `fast-jev-compaction` `0.4.0`
 
-The extension intentionally has a strict Pi `0.85.1` guard. The adapter relies
-on the mutable `session_before_compact` preparation object used by that Pi
-release; this is not currently a formal extension API for replacing the
-native preparation arrays. On another Pi version, the extension does not
-modify the preparation and Pi falls back to ordinary native compaction.
+The extension has a strict Pi `0.85.1` version guard because the adapter relies
+on the mutable `session_before_compact` preparation object used by that release.
+This is not a formally documented extension API for replacing native
+preparation arrays. On any other Pi version the extension leaves the
+preparation untouched and Pi falls back to ordinary native compaction.
 
 This package does not modify Pi's source code or call Pi's exported
 `compact()` function itself.
 
 ## Installation
+
+Install from Pi Package (npm):
+
+```sh
+pi install npm:@lienat/pi-jev-compaction
+```
 
 Install from the GitHub repository:
 
@@ -92,19 +131,19 @@ Install from the GitHub repository:
 pi install git:github.com/Jul1en-Lin/pi-jev-compaction@main
 ```
 
-Or install the current checkout for local development:
+Or install a local checkout for development:
 
 ```sh
 pi install /Users/lien/prj/pi-fast-jev-compaction
 ```
 
-Restart Pi after installation. Check the installed packages with:
+Restart Pi after installation. Verify with:
 
 ```sh
 pi list
 ```
 
-To remove the GitHub installation:
+To uninstall the GitHub version:
 
 ```sh
 pi remove git:github.com/Jul1en-Lin/pi-jev-compaction
@@ -112,64 +151,37 @@ pi remove git:github.com/Jul1en-Lin/pi-jev-compaction
 
 ## Configuration
 
-The extension uses the official TypeSafe Jev endpoint through the upstream
-package. Configure the key in the environment of the terminal that starts
-Pi:
+The extension reaches the official TypeSafe Jev endpoint through the upstream
+package. Set the API key in the environment of the terminal that starts Pi:
 
 ```sh
 export TYPESAFE_API_KEY='your-typesafe-key'
 ```
 
-The key is read at runtime, sent only in the authenticated Jev request, and
+The key is read at runtime and used only to authenticate Jev requests. It is
 never written to the package, Pi settings, session files, or extension logs.
 Do not commit it or paste it into a shared shell history.
 
-The complete Jev decision state can contain conversation text and tool input,
-which may include source code, file paths, commands, or other sensitive data.
-Use this extension only when sending that information to TypeSafe is
-acceptable.
+The Jev decision payload can include conversation text and tool input, which
+may contain source code, file paths, commands, or other sensitive data. Only
+use this extension if you are comfortable sending that information to TypeSafe.
 
 ### Timeout
 
-`PI_FAST_JEV_TIMEOUT_MS` controls the whole Jev attempt and defaults to
-15,000 milliseconds:
+`PI_FAST_JEV_TIMEOUT_MS` controls the total time allowed for one Jev attempt,
+including both native preparation arrays. It defaults to 15 seconds:
 
 ```sh
 export PI_FAST_JEV_TIMEOUT_MS=15000
 ```
 
-If the key is missing, Pi is an unsupported version, Jev times out, the
-request fails, or the response is invalid, the adapter prints a short warning
-and leaves the original preparation untouched. Pi then performs its ordinary
-native compaction. It does not invoke `/compact` recursively.
+If the API key is missing, the Pi version is unsupported, Jev times out, the
+request fails, or the response is invalid, the adapter prints a brief warning
+and leaves the original preparation unchanged. Pi then runs its ordinary
+native compaction. The extension never invokes `/compact` recursively.
 
-A user cancellation is passed through to the Jev request and does not replace
-or modify the native preparation.
-
-## Notices in Pi
-
-Normal path:
-
-```text
-[jev] 21 call(s) reviewed: dropped 18, shortened 0 · 955ms; Pi will create the native summary.
-```
-
-No useful changes:
-
-```text
-[jev] 12 call(s) reviewed: nothing dropped · 301ms; Pi will create the native summary.
-```
-
-Fallback examples:
-
-```text
-[jev] skipped: TYPESAFE_API_KEY is not set; using Pi's native compaction.
-[jev] timed out after 15000ms · 15.0s; using Pi's native compaction.
-[jev] failed · 802ms; using Pi's native compaction.
-```
-
-These notices are transient TUI notifications. The extension does not write
-request content or API errors to disk.
+When the user cancels a compaction, the cancellation signal is forwarded to
+the Jev request and the native preparation is not replaced or modified.
 
 ## Development
 
@@ -186,49 +198,35 @@ npm run typecheck
 npm test
 ```
 
-The tests use injected Jev askers and timers. They do not call TypeSafe or a
-main model. The test suite covers message mapping, tool-call/result pairing,
-image and thinking preservation, split preparation inputs, timeout and
-cancellation, native fallback, and Pi hook behavior.
-
 Build the package:
 
 ```sh
 npm run build
 ```
 
-Create a local npm tarball without publishing it:
+Create a local npm tarball without publishing:
 
 ```sh
 npm pack --ignore-scripts
 ```
 
-## Project layout
-
-```text
-extensions/fast-jev-compaction.ts  Pi lifecycle hook
-src/adapter.ts                     Jev transport and native-message adapter
-test/                              Offline tests
-package.json                       Pi package manifest and pinned dependency
-```
-
 ## Acknowledgements and attribution
 
-This adapter is built on and gratefully acknowledges
-[fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) by
-[Tamara Tran](https://github.com/tamaratran). The upstream project provides
+This adapter uses `fast-jev-compaction@0.4.0`, the
+[`aleksvega/fast-jev-compaction`](https://github.com/aleksvega/fast-jev-compaction)
+fork based on [`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction)
+by [Tamara Tran](https://github.com/tamaratran). The upstream project provides
 the Jev decision logic that this Pi adapter integrates with native Pi
 compaction.
 
 If you believe this repository contains material that infringes your rights,
-or if attribution needs to be corrected, please contact the maintainer by
-opening an issue at
+or if the attribution needs to be corrected, please open an issue at
 [github.com/Jul1en-Lin/pi-jev-compaction/issues](https://github.com/Jul1en-Lin/pi-jev-compaction/issues).
 We will review the request and remove or revise the affected material where
 appropriate.
 
 ## License
 
-This adapter is licensed under the MIT License. Please also review the
-upstream project's license and attribution:
-[fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction).
+This adapter is released under the MIT License. Please also review the
+upstream project's license and attribution requirements:
+[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction).
