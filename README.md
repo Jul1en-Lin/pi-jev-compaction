@@ -204,8 +204,23 @@ test/                              Offline tests
 package.json                       Pi package manifest and pinned dependency
 ```
 
+## Acknowledgements and attribution
+
+This adapter is built on and gratefully acknowledges
+[fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) by
+[Tamara Tran](https://github.com/tamaratran). The upstream project provides
+the Jev decision logic that this Pi adapter integrates with native Pi
+compaction.
+
+If you believe this repository contains material that infringes your rights,
+or if attribution needs to be corrected, please contact the maintainer by
+opening an issue at
+[github.com/Jul1en-Lin/pi-jev-compaction/issues](https://github.com/Jul1en-Lin/pi-jev-compaction/issues).
+We will review the request and remove or revise the affected material where
+appropriate.
+
 ## License
 
-MIT. The Jev decision library is provided by the upstream
-[fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
-project.
+This adapter is licensed under the MIT License. Please also review the
+upstream project's license and attribution:
+[fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction).
