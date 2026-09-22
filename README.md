@@ -1,17 +1,17 @@
 # pi-jev-compaction
 
-
 English version: [README.en.md](README.en.md)
 
-一个用于上下文压缩之前 [Pi](https://github.com/badlogic/pi-mono) 的扩展，此处的源码来源于[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction)的原生 claude code 的插件，针对 pi 的情况进行了适配。它会在 Pi 执行原生上下文压缩前，筛选不再需要的工具调用和工具结果。
+一个用于上下文压缩之前 [Pi](https://github.com/badlogic/pi-mono) 的扩展，此处的源码来源于[`fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction)的原生 claude code 的插件，针对 pi 的情况进行了适配。它会在 Pi 执行原生上下文压缩前，筛选不再需要的工具调用和工具结果，最终的压缩逻辑还是交给 Pi 原生的 `/compact()` 管理。
 
-本项目是 **Pi 适配层**，不是对 Pi 原生压缩系统的替换。Jev 只负责判断哪些工具调用应保留、删除或截短；最终摘要、压缩节点、文件操作信息和近期上下文仍由 Pi 原生 `compact()` 生成和管理。
+里面的决策策略由 Jev 模型负责判断哪些工具调用应保留、删除或截短，本插件不修改 Pi 源码，也不会自行调用 Pi 导出的 `compact()` 函数。
 
 ## 视频演示
 
 ![Jev instant compaction demo](./assets/tamarajtran-jev-compaction.gif)
 
 视频来源：[Tamara Tran 在 X 发布的视频](https://x.com/tamarajtran/status/2100694549362553153)。GIF 仅作为项目演示素材保留，版权归原作者所有。
+
 
 ## 工作方式
 
@@ -23,13 +23,17 @@ Pi 准备压缩
 session_before_compact
     ↓
 Jev 检查符合条件的工具调用/结果对
+    │
     ├─ 成功：只替换 Pi 原生的待摘要消息数组
     │          ↓
     │       Pi 原生 compact()
+    │
     └─ 超时、报错或响应无效：保持原始数组不变
                ↓
             Pi 原生 compact()
 ```
+
+## 数据管理
 
 适配层不会把 Jev 的简化 transcript 重新拼回 Pi，而是将 Jev 的决策映射回原始 Pi 消息。因此，Pi 的 thinking、图片、工具调用元数据和其他原生消息数据不会因为适配而被转换成普通文字。
 
@@ -66,11 +70,9 @@ Jev 检查符合条件的工具调用/结果对
 
 - Pi `0.85.1`
 - Node.js `>=24`
-- `fast-jev-compaction` `0.4.0`
 
-扩展对 Pi 版本进行严格检查，因为当前适配依赖 Pi `0.85.1` 的 `session_before_compact` preparation 对象可变行为；这不是 Pi 正式承诺的“替换原生压缩输入”扩展接口。使用其他 Pi 版本时，扩展不会修改压缩输入，Pi 会安全地回退到原生压缩。
+扩展对 Pi 版本进行严格检查，因为当前适配依赖 Pi `0.85.1` 的 `session_before_compact` preparation 对象可变行为；并没有替换原生压缩输入的扩展接口。所以使用其他 Pi 版本时，扩展不会修改压缩输入，Pi 会安全地回退到原生压缩。
 
-本项目不修改 Pi 源码，也不会自行调用 Pi 导出的 `compact()` 函数。
 
 ## 安装
 
@@ -118,7 +120,7 @@ API Key 只在运行时读取，并只用于认证 Jev 请求；不会写入本�
 export PI_FAST_JEV_TIMEOUT_MS=15000
 ```
 
-如果 API Key 缺失、Pi 版本不支持、Jev 超时、请求失败或响应无效，扩展会显示简短提示并保持原始压缩输入不变，然后由 Pi 执行普通原生压缩。扩展不会递归调用 `/compact`。
+如果 API Key 缺失、Pi 版本不支持、Jev 超时、请求失败或响应无效，扩展会显示简短提示并保持原始压缩输入不变，然后由 Pi 执行普通原生压缩。
 
 用户主动取消压缩时，取消信号会传递给 Jev，扩展不会替换或修改原生压缩输入。
 
@@ -136,8 +138,6 @@ npm install --ignore-scripts --no-audit --no-fund
 npm run typecheck
 npm test
 ```
-
-测试使用注入的 Jev asker 和计时器，不会访问 TypeSafe，也不会调用主模型。测试覆盖消息映射、工具调用/结果配对、图片和 thinking 保留、两组压缩输入、超时、取消、原生回退和 Pi hook 行为。
 
 构建：
 
@@ -158,6 +158,8 @@ npm pack --ignore-scripts
 
 如果你认为本仓库包含侵犯你权利的内容，或署名信息需要修正，请在
 [GitHub Issues](https://github.com/Jul1en-Lin/pi-jev-compaction/issues) 联系维护者。我们会审核请求，并在适当情况下删除或修订相关内容。
+
+欢迎大家使用并指出指导性意见，感谢！
 
 ## 许可证
 
