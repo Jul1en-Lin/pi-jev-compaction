@@ -1,0 +1,42 @@
+{
+  "name": "pi-fast-jev-compaction",
+  "version": "0.1.0",
+  "description": "Apply fast-jev-compaction decisions before Pi's native compaction summary.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/Jul1en-Lin/pi-jev-compaction.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Jul1en-Lin/pi-jev-compaction/issues"
+  },
+  "keywords": ["pi-package", "pi-extension", "jev", "compaction"],
+  "engines": {
+    "node": ">=24"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "files": ["extensions", "src", "README.md", "LICENSE", "package.json", "package-lock.json"],
+  "bundledDependencies": ["fast-jev-compaction"],
+  "dependencies": {
+    "fast-jev-compaction": "0.4.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  }
+}
