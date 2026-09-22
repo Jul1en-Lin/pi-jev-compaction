@@ -11,12 +11,10 @@ compaction entry, file-operation details, and retained recent context.
 
 ## Demo
 
-<video controls width="640" src="./assets/tamarajtran-jev-compaction.mp4">
-  Your browser does not support the video tag.
-</video>
+![Jev instant compaction demo](./assets/tamarajtran-jev-compaction.gif)
 
 Video source: [Tamara Tran's post on X](https://x.com/tamarajtran/status/2100694549362553153).
-The video is included as demonstration material; all rights remain with the
+The GIF is included as demonstration material; all rights remain with the
 original author.
 
 ## How it works

@@ -9,11 +9,9 @@ English version: [README.en.md](README.en.md)
 
 ## 视频演示
 
-<video controls width="640" src="./assets/tamarajtran-jev-compaction.mp4">
-  Your browser does not support the video tag.
-</video>
+![Jev instant compaction demo](./assets/tamarajtran-jev-compaction.gif)
 
-视频来源：[Tamara Tran 在 X 发布的视频](https://x.com/tamarajtran/status/2100694549362553153)。视频文件仅作为项目演示素材保留，版权归原作者所有。
+视频来源：[Tamara Tran 在 X 发布的视频](https://x.com/tamarajtran/status/2100694549362553153)。GIF 仅作为项目演示素材保留，版权归原作者所有。
 
 ## 工作方式
 
