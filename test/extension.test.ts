@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -123,6 +124,137 @@ test("one shared session_before_compact hook handles manual and automatic prepar
     assert.equal(notifications.length, 1);
     assert.match(notifications[0]!, oneLineWithTimes("2 call\\(s\\) reviewed: dropped 2, shortened 0"));
   }
+});
+
+test("a different Pi version does not disable filtering", () => {
+  for (const version of ["0.87.1", "0.99.0"]) {
+    const script = `
+      import assert from "node:assert/strict";
+      import { registerHooks } from "node:module";
+      registerHooks({
+        resolve(specifier, context, nextResolve) {
+          if (specifier === "@earendil-works/pi-coding-agent") {
+            return { url: 'data:text/javascript,export const VERSION = ${JSON.stringify(version)}', shortCircuit: true };
+          }
+          return nextResolve(specifier, context);
+        },
+      });
+      const { install } = await import(${JSON.stringify(new URL("../extensions/fast-jev-compaction.js", import.meta.url).href)});
+      const preparation = ${JSON.stringify({ messagesToSummarize: toolPair("version"), turnPrefixMessages: [] })};
+      let handler;
+      let asked = false;
+      const notifications = [];
+      install({ on(_event, callback) { handler = callback; } }, {
+        asker: { async ask(_state, questions) {
+          asked = true;
+          return { answers: Object.fromEntries(Object.keys(questions).map(key => [key, { noul: 0 }])) };
+        } },
+      });
+      await handler({ preparation, signal: new AbortController().signal }, {
+        ui: { notify(message) { notifications.push(message); } },
+      });
+      assert.equal(asked, true, notifications.join("\\n"));
+      assert.equal(preparation.messagesToSummarize.length, 7);
+      assert.match(notifications[0], /dropped 1/);
+    `;
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], { encoding: "utf8" });
+    assert.equal(result.status, 0, `Pi ${version}: ${result.stderr}`);
+  }
+});
+
+test("incompatible preparation skips Jev without changing either input", async () => {
+  const history = toolPair("incompatible-history");
+  const prefix = toolPair("incompatible-prefix");
+  const frozen = Object.freeze({ messagesToSummarize: history, turnPrefixMessages: prefix });
+  const readonlyPrefix = Object.defineProperty(
+    { messagesToSummarize: history, turnPrefixMessages: prefix },
+    "turnPrefixMessages", { writable: false },
+  );
+  const readonlyHistory = Object.defineProperty(
+    { messagesToSummarize: history, turnPrefixMessages: prefix },
+    "messagesToSummarize", { writable: false },
+  );
+  const accessorPrefix = {
+    messagesToSummarize: history,
+    get turnPrefixMessages() { throw new Error("must not invoke an incompatible getter"); },
+  };
+  for (const preparation of [
+    undefined, null, {},
+    { messagesToSummarize: history },
+    { messagesToSummarize: history, turnPrefixMessages: "changed API" },
+    { messagesToSummarize: {}, turnPrefixMessages: prefix },
+    frozen, readonlyPrefix, readonlyHistory, accessorPrefix,
+  ]) {
+    let handler: ((event: any, ctx: any) => Promise<void>) | undefined;
+    let asked = false;
+    install({ on(_event: string, callback: typeof handler) { handler = callback; } } as unknown as ExtensionAPI, {
+      asker: { async ask(state, questions) { asked = true; return dropAsker.ask(state, questions); } },
+    });
+    const before = preparation && Object.getOwnPropertyDescriptors(preparation);
+    const notifications: string[] = [];
+    await handler!({ preparation, signal: new AbortController().signal }, {
+      ui: { notify(message: string) { notifications.push(message); } },
+    });
+    assert.equal(asked, false);
+    assert.deepEqual(preparation && Object.getOwnPropertyDescriptors(preparation), before);
+    assert.equal(notifications.length, 1);
+    assert.match(notifications[0]!, /incompatible.*native compaction/);
+  }
+});
+
+test("readonly arrays remain compatible when their preparation fields are writable", async () => {
+  let handler: ((event: any, ctx: any) => Promise<void>) | undefined;
+  install({ on(_event: string, callback: typeof handler) { handler = callback; } } as unknown as ExtensionAPI, {
+    asker: dropAsker,
+  });
+  const history = Object.freeze(toolPair("frozen-history"));
+  const prefix = Object.freeze(toolPair("frozen-prefix"));
+  const preparation = Object.seal({ messagesToSummarize: history, turnPrefixMessages: prefix });
+  await handler!({ preparation, signal: new AbortController().signal }, { ui: { notify() {} } });
+  assert.equal(preparation.messagesToSummarize.length, 7);
+  assert.equal(preparation.turnPrefixMessages.length, 7);
+  assert.equal(history.length, 9);
+  assert.equal(prefix.length, 9);
+});
+
+test("an incompatible cancellation signal skips Jev", async () => {
+  for (const signal of [undefined, null, {}]) {
+    let handler: ((event: any, ctx: any) => Promise<void>) | undefined;
+    let asked = false;
+    install({ on(_event: string, callback: typeof handler) { handler = callback; } } as unknown as ExtensionAPI, {
+      asker: { async ask(state, questions) { asked = true; return dropAsker.ask(state, questions); } },
+    });
+    const preparation = { messagesToSummarize: toolPair("signal"), turnPrefixMessages: [] };
+    const before = { ...preparation };
+    const notifications: string[] = [];
+    await handler!({ preparation, signal }, {
+      ui: { notify(message: string) { notifications.push(message); } },
+    });
+    assert.equal(asked, false);
+    assert.equal(preparation.messagesToSummarize, before.messagesToSummarize);
+    assert.equal(preparation.turnPrefixMessages, before.turnPrefixMessages);
+    assert.match(notifications[0]!, /incompatible.*native compaction/);
+  }
+});
+
+test("preparation made readonly during Jev is not partially replaced", async () => {
+  const history = toolPair("readonly-history");
+  const prefix = toolPair("readonly-prefix");
+  const preparation = { messagesToSummarize: history, turnPrefixMessages: prefix };
+  let handler: ((event: any, ctx: any) => Promise<void>) | undefined;
+  install({ on(_event: string, callback: typeof handler) { handler = callback; } } as unknown as ExtensionAPI, {
+    asker: { async ask(state, questions) {
+      Object.defineProperty(preparation, "turnPrefixMessages", { writable: false });
+      return dropAsker.ask(state, questions);
+    } },
+  });
+  const notifications: string[] = [];
+  await handler!({ preparation, signal: new AbortController().signal }, {
+    ui: { notify(message: string) { notifications.push(message); } },
+  });
+  assert.equal(preparation.messagesToSummarize, history);
+  assert.equal(preparation.turnPrefixMessages, prefix);
+  assert.match(notifications[0]!, /incompatible.*native compaction/);
 });
 
 test("failure and user cancellation leave the native preparation untouched", async () => {

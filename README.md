@@ -78,10 +78,12 @@ Jev 并不会看到完整的 Pi 会话。它只处理 Pi 本次压缩提供的 `
 
 ## 兼容性
 
-- Pi `0.85.1`
+- Pi：尽力兼容，不按精确版本号限制启用，在最新的`0.87.1`版本已可用。
 - Node.js `>=24`
 
-扩展对 Pi 版本进行严格检查，因为当前适配依赖 Pi `0.85.1` 的 `session_before_compact` preparation 对象可变行为；并没有替换原生压缩输入的扩展接口。所以使用其他 Pi 版本时，扩展不会修改压缩输入，Pi 会安全地回退到原生压缩。
+Pi 不会仅因版本号不同而禁用扩展。扩展会检查 `session_before_compact` 提供的两组待摘要消息是否为可替换的数组，以及取消信号是否可用；检查不通过时会提示并跳过 Jev，由 Pi 继续原生压缩。
+
+扩展依赖 Pi 后续使用修改后的 preparation 对象，如果 Pi 改变了这一流程，仍需要更新适配。
 
 
 ## 安装
@@ -136,7 +138,7 @@ API Key 只在运行时读取，并只用于认证 Jev 请求；不会写入本�
 export PI_FAST_JEV_TIMEOUT_MS=15000
 ```
 
-如果 API Key 缺失、Pi 版本不支持、Jev 超时、请求失败或响应无效，扩展会显示简短提示并保持原始压缩输入不变，然后由 Pi 执行普通原生压缩。
+如果 API Key 缺失、Pi 压缩输入不兼容、Jev 超时、请求失败或响应无效，扩展会显示简短提示并保持原始压缩输入不变，然后由 Pi 执行普通原生压缩。
 
 用户主动取消压缩时，取消信号会传递给 Jev，扩展不会替换或修改原生压缩输入。
 
@@ -154,6 +156,15 @@ npm install --ignore-scripts --no-audit --no-fund
 npm run typecheck
 npm test
 ```
+
+默认集成测试使用项目安装的 Pi。也可以指定另一个已安装的 Pi 包目录（只用于测试，不控制插件行为）：
+
+```sh
+npm run build
+PI_TEST_HOST_PATH=/path/to/pi-coding-agent node --test dist/test/pi-host.test.js
+```
+
+此测试不访问 Jev 或模型服务。
 
 构建：
 

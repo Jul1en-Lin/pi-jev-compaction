@@ -1,4 +1,4 @@
-import { VERSION, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   createDeadline,
   createJevAsker,
@@ -7,8 +7,6 @@ import {
   type TimerApi,
 } from "../src/adapter.js";
 import type { JevAsker } from "fast-jev-compaction";
-
-const SUPPORTED_PI_VERSION = "0.85.1";
 
 export interface ExtensionDependencies {
   apiKey?: string;
@@ -27,13 +25,18 @@ export function formatElapsed(milliseconds: number): string {
   return milliseconds < 1000 ? `${milliseconds}ms` : `${(milliseconds / 1000).toFixed(1)}s`;
 }
 
+function canFilterPreparation(preparation: unknown): boolean {
+  if (typeof preparation !== "object" || preparation === null) return false;
+  return ["messagesToSummarize", "turnPrefixMessages"].every((key) => {
+    const field = Object.getOwnPropertyDescriptor(preparation, key);
+    return field?.writable === true && Array.isArray(field.value);
+  });
+}
+
 export function install(pi: ExtensionAPI, dependencies: ExtensionDependencies = {}): void {
   pi.on("session_before_compact", async (event, ctx) => {
-    if (VERSION !== SUPPORTED_PI_VERSION) {
-      ctx.ui.notify(
-        `[jev] skipped: Pi ${VERSION} is not ${SUPPORTED_PI_VERSION}; using Pi's native compaction.`,
-        "warning",
-      );
+    if (!canFilterPreparation(event.preparation) || !(event.signal instanceof AbortSignal)) {
+      ctx.ui.notify("[jev] skipped: incompatible Pi compaction input; using Pi's native compaction.", "warning");
       return;
     }
 
@@ -64,6 +67,12 @@ export function install(pi: ExtensionAPI, dependencies: ExtensionDependencies = 
           `[jev] ${filtered.candidateCalls} call(s) reviewed: nothing dropped · ${elapsed}; Pi will create the native summary.`,
           "info",
         );
+        return;
+      }
+
+      // Recheck after the asynchronous Jev request, before replacing either input.
+      if (!canFilterPreparation(event.preparation)) {
+        ctx.ui.notify("[jev] skipped: incompatible Pi compaction input; using Pi's native compaction.", "warning");
         return;
       }
 

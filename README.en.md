@@ -104,15 +104,26 @@ is not a count of questions or request batches.
 
 ## Compatibility
 
-- Pi `0.85.1`
+- Pi: best-effort compatibility, without an exact-version gate; development types remain pinned to `0.85.1`.
 - Node.js `>=24`
 - `fast-jev-compaction` `0.4.0`
 
-The extension has a strict Pi `0.85.1` version guard because the adapter relies
-on the mutable `session_before_compact` preparation object used by that release.
-This is not a formally documented extension API for replacing native
-preparation arrays. On any other Pi version the extension leaves the
-preparation untouched and Pi falls back to ordinary native compaction.
+An offline manual-compaction integration test passes with Pi `0.85.1` and
+`0.87.1`. It uses simulated Jev decisions and summary-model responses to verify
+that Pi consumes the filtered input and creates a native compaction entry.
+This does not validate every model or automatic-compaction scenario.
+
+A Pi upgrade no longer disables the extension solely because its version differs.
+The extension checks that `session_before_compact` provides two replaceable
+message arrays and a usable cancellation signal. If those checks fail, it warns
+and skips Jev, leaving Pi to perform native compaction. Both fields are checked
+again before writing results to avoid replacing only one input.
+
+This does not guarantee compatibility with every Pi release. The adapter still
+relies on Pi consuming the mutated preparation object, which is not a formally
+documented API for replacing native compaction inputs. Structural checks cannot
+detect every behavioral change. Changes to that lifecycle may require an adapter
+update, but ordinary Pi releases do not inherently require one.
 
 This package does not modify Pi's source code or call Pi's exported
 `compact()` function itself.
@@ -175,7 +186,7 @@ including both native preparation arrays. It defaults to 15 seconds:
 export PI_FAST_JEV_TIMEOUT_MS=15000
 ```
 
-If the API key is missing, the Pi version is unsupported, Jev times out, the
+If the API key is missing, the Pi compaction input is incompatible, Jev times out, the
 request fails, or the response is invalid, the adapter prints a brief warning
 and leaves the original preparation unchanged. Pi then runs its ordinary
 native compaction. The extension never invokes `/compact` recursively.
@@ -197,6 +208,17 @@ Run the checks:
 npm run typecheck
 npm test
 ```
+
+The integration test uses the project's installed Pi by default. To test another
+installed Pi package, specify its directory (test-only; this does not configure
+the extension):
+
+```sh
+npm run build
+PI_TEST_HOST_PATH=/path/to/pi-coding-agent node --test dist/test/pi-host.test.js
+```
+
+This test does not contact Jev or a model service.
 
 Build the package:
 
